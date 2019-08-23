@@ -31,6 +31,9 @@ inertial measurement unit module with sensor fusion.
 * Author(s): Radomir Dopieralski
 """
 import time
+import os
+CAL_DATA_PATH = os.path.dirname(os.path.abspath(__file__))
+CAL_DATA_NAME = "BNO055_CALIBRATION_DATA.txt"
 
 from micropython import const
 from adafruit_bus_device.i2c_device import I2CDevice
@@ -137,6 +140,10 @@ class BNO055:
         self.buffer[1] = value
         with self.i2c_device as i2c:
             i2c.write(self.buffer)
+            
+    def _write_bytes(self, address, data):
+        with self.i2c_device as i2c:
+            i2c.writeList(address, data)
 
     def _read_register(self, register):
         self.buffer[0] = register
@@ -144,6 +151,10 @@ class BNO055:
             i2c.write_then_readinto(self.buffer, self.buffer,
                                     out_end=1, in_start=1)
         return self.buffer[1]
+    
+    def _read_bytes(self, address, length):
+        if self._i2c_device is not None:
+            return bytearray(self._i2c_device.readList(address, length))
 
     def _reset(self):
         """Resets the sensor to default settings."""
@@ -205,6 +216,44 @@ class BNO055:
             self._write_register(_MODE_REGISTER, new_mode)
             time.sleep(0.01)  # Table 3.6
 
+    @property
+    def get_calibration(self):
+        """Gets the BNO055's calibration data if it exists"""
+        if not self.calibrated:
+            raise ValueError('Device not yet calibrated!')
+        self.mode(CONFIG_MODE)
+        data = list(self._read_bytes(0x55, 22))
+        self.mode(NDOF_MODE)
+        return data
+        
+    @property
+    def set_calibration(self, data):
+        """Sets the BNO055's calibration data"""
+        if data is None or len(data) != 22:
+            raise ValueError('Expected a list of 22 bytes of calibration data!')
+        self.mode(CONFIG_MODE)
+        self._write_bytes(0x55, data)        
+        self.mode(NDOF_MODE)
+        
+    @property
+    def load_calibration(self, fpath):
+        """Loads the BNO055's calibration data from a file"""
+        data = bytearray(22)
+        with open(CAL_DATA_PATH+CAL_DATA_NAME, 'r') as f:
+            if len(f.read().split('\n')) != 22:
+                raise ValueError('Expected a list of 22 bytes of calibration data!')     
+            for item in f.read().split('\n'):
+                data[idx] = byte(item, 'utf-8')
+            f.close()
+        return data
+        
+    @property
+    def save_calibration(self, fpath):
+        """Saves the BNO055's calibration data to a file"""
+        with open(CAL_DATA_PATH+CAL_DATA_NAME, 'wb') as f:
+            for item in self.get_calibration:
+                f.write("%s\n" % item)
+            f.close()
     @property
     def calibration_status(self):
         """Tuple containing sys, gyro, accel, and mag calibration data."""
